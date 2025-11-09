@@ -1,0 +1,17 @@
+// src/styles.scss
+
+// ✅ Підключає Bootstrap у правильному порядку
+@use "bootstrap/scss/bootstrap" as *;
+
+// ✅ Іконки (якщо потрібно)
+@import "bootstrap-icons/font/bootstrap-icons.css";
+
+// ✅ Твої власні стилі
+.card {
+  background-color: #f8f9fa;
+}
+
+.list-group-item {
+  background-color: #f8f9fa;
+  border: none;
+}

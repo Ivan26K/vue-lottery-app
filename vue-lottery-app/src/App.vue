@@ -1,122 +1,54 @@
-<!-- src/App.vue -->
 <template>
   <div class="container mt-5">
-    <!-- Блок переможців -->
-    <div class="card mb-4">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        Winners
-        <button
-            class="btn btn-primary"
-            :disabled="winners.length >= 3 || participants.length === 0"
-            @click="selectWinner"
-        >
-          New winner
-        </button>
-      </div>
-      <div class="card-body">
-        <ul class="list-group list-group-flush">
-          <li v-for="(winner, index) in winners" :key="index" class="list-group-item d-flex justify-content-between align-items-center">
-            {{ winner.name }}
-            <button type="button" class="btn-close" @click="removeWinner(index)"></button>
-          </li>
-        </ul>
-      </div>
-    </div>
+    <h1 class="mb-4">Lottery App</h1>
 
-    <!-- Блок форми реєстрації -->
-    <div class="card mb-4">
-      <div class="card-header">Register Form</div>
-      <div class="card-body">
-        <form @submit.prevent="addParticipant">
-          <div class="mb-3">
-            <label for="name" class="form-label">Name</label>
-            <input
-                id="name"
-                v-model="form.name"
-                type="text"
-                class="form-control"
-                :class="{ 'is-invalid': errors.name }"
-                placeholder="Enter user name"
-                required
-            />
-            <div v-if="errors.name" class="invalid-feedback">{{ errors.name }}</div>
-          </div>
-          <div class="mb-3">
-            <label for="dob" class="form-label">Date of Birth</label>
-            <input
-                id="dob"
-                v-model="form.dob"
-                type="date"
-                class="form-control"
-                :class="{ 'is-invalid': errors.dob }"
-                required
-            />
-            <div v-if="errors.dob" class="invalid-feedback">{{ errors.dob }}</div>
-          </div>
-          <div class="mb-3">
-            <label for="email" class="form-label">Email</label>
-            <input
-                id="email"
-                v-model="form.email"
-                type="email"
-                class="form-control"
-                :class="{ 'is-invalid': errors.email }"
-                placeholder="Enter email"
-                required
-            />
-            <div v-if="errors.email" class="invalid-feedback">{{ errors.email }}</div>
-          </div>
-          <div class="mb-3">
-            <label for="phone" class="form-label">Phone number</label>
-            <input
-                id="phone"
-                v-model="form.phone"
-                type="tel"
-                class="form-control"
-                :class="{ 'is-invalid': errors.phone }"
-                placeholder="Enter Phone number"
-                required
-            />
-            <div v-if="errors.phone" class="invalid-feedback">{{ errors.phone }}</div>
-          </div>
-          <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-      </div>
-    </div>
+    <WinnersList :winners="winners" :participants="participants" @add-winner="selectWinner" @remove-winner="removeWinner" />
 
-    <!-- Блок таблиці учасників -->
-    <div class="card">
-      <div class="card-header">Participants</div>
-      <div class="card-body">
-        <table class="table">
-          <thead>
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">Name</th>
-            <th scope="col">Date of Birth</th>
-            <th scope="col">Email</th>
-            <th scope="col">Phone number</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr v-for="(participant, index) in participants" :key="index">
-            <th scope="row">{{ index + 1 }}</th>
-            <td>{{ participant.name }}</td>
-            <td>{{ formatDate(participant.dob) }}</td>
-            <td>{{ participant.email }}</td>
-            <td>{{ participant.phone }}</td>
-          </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <RegisterForm ref="registerForm" :external-error="externalError" @submit="handleAddParticipant" />
+
+    <SearchBar @update:search="searchQuery = $event" />
+
+    <ParticipantsTable
+        :participants="sortedParticipants"
+        :sort-key="sortKey"
+        :sort-order="sortOrder"
+        @sort="handleSort"
+        @edit="openEditModal"
+        @delete="openDeleteModal"
+    />
+
+    <!-- Модал для редагування -->
+    <Modal v-if="showEditModal" title="Редагувати дані учасника" @close="closeEditModal" @keyup.esc="closeEditModal">
+      <template #body>
+        <RegisterForm :initial-user="editingUser" :external-error="externalError" is-edit @submit="handleUpdateParticipant" />
+      </template>
+    </Modal>
+
+    <!-- Модал для видалення -->
+    <Modal v-if="showDeleteModal" title="Підтвердження видалення" @close="closeDeleteModal" @keyup.esc="closeDeleteModal">
+      <template #body>
+        <p v-if="deletingUser">Ви дійсно бажаєте видалити учасника "{{ deletingUser.name }}", "{{ deletingUser.email }}"?</p>
+      </template>
+      <template #footer>
+        <CustomButton label="Так" @click="confirmDelete" />
+        <CustomButton label="Ні" @click="closeDeleteModal" />
+      </template>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { ref, watch, onMounted, computed } from 'vue';
+import { v4 as uuidv4 } from 'uuid';
+import WinnersList from './components/WinnersList.vue';
+import RegisterForm from './components/RegisterForm.vue';
+import ParticipantsTable from './components/ParticipantsTable.vue';
+import SearchBar from './components/SearchBar.vue';
+import Modal from './components/Modal.vue';
+import CustomButton from './components/CustomButton.vue';
 
 interface User {
+  id: string;
   name: string;
   dob: string;
   email: string;
@@ -125,80 +57,92 @@ interface User {
 
 const participants = ref<User[]>([]);
 const winners = ref<User[]>([]);
+const externalError = ref('');
+const searchQuery = ref('');
+const sortKey = ref<'name' | 'dob'>('name');
+const sortOrder = ref<1 | -1>(1);
+const showEditModal = ref(false);
+const showDeleteModal = ref(false);
+const editingUser = ref<User | null>(null);
+const deletingUser = ref<User | null>(null);
 
-const form = reactive<User>({
-  name: '',
-  dob: '',
-  email: '',
-  phone: '',
+const filteredParticipants = computed(() => {
+  return participants.value.filter(p => p.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
 });
 
-const errors = reactive<Record<string, string>>({
-  name: '',
-  dob: '',
-  email: '',
-  phone: '',
-});
-
-function validate(): boolean {
-  let valid = true;
-
-  errors.name = form.name.trim() ? '' : 'This value is required.';
-  if (errors.name) valid = false;
-
-  errors.dob = '';
-  if (!form.dob) {
-    errors.dob = 'This value is required.';
-    valid = false;
-  } else {
-    const dobDate = new Date(form.dob);
-    const now = new Date();
-    if (dobDate > now) {
-      errors.dob = 'Date of Birth cannot be in the future';
-      valid = false;
+const sortedParticipants = computed(() => {
+  return [...filteredParticipants.value].sort((a, b) => {
+    if (sortKey.value === 'dob') {
+      return sortOrder.value * (new Date(a.dob).getTime() - new Date(b.dob).getTime());
     }
-  }
+    return sortOrder.value * a.name.localeCompare(b.name);
+  });
+});
 
-  errors.email = '';
-  if (!form.email.trim()) {
-    errors.email = 'This value is required.';
-    valid = false;
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-    errors.email = 'Invalid email format';
-    valid = false;
+onMounted(() => {
+  const stored = localStorage.getItem('participants');
+  if (stored) {
+    participants.value = JSON.parse(stored);
   }
+});
 
-  errors.phone = '';
-  if (!form.phone.trim()) {
-    errors.phone = 'This value is required.';
-    valid = false;
-  } else if (!/^\+?[\d\s()-]{7,15}$/.test(form.phone)) {
-    errors.phone = 'Invalid phone number format';
-    valid = false;
+watch(participants, (newVal) => {
+  localStorage.setItem('participants', JSON.stringify(newVal));
+}, { deep: true });
+
+function handleAddParticipant(user: Omit<User, 'id'>) {
+  if (participants.value.some(p => p.email === user.email)) {
+    externalError.value = 'Учасник з такою електронною поштою вже існує.';
+    return;
   }
-
-  return valid;
+  externalError.value = '';
+  participants.value.push({ id: uuidv4(), ...user });
 }
 
-function addParticipant() {
-  if (!validate()) return;
+function openEditModal(user: User) {
+  editingUser.value = { ...user };
+  showEditModal.value = true;
+}
 
-  participants.value.push({ ...form });
+function closeEditModal() {
+  showEditModal.value = false;
+  editingUser.value = null;
+  externalError.value = '';
+}
 
-  form.name = '';
-  form.dob = '';
-  form.email = '';
-  form.phone = '';
+function handleUpdateParticipant(updatedUser: User) {
+  if (updatedUser.email !== editingUser.value?.email && participants.value.some(p => p.email === updatedUser.email)) {
+    externalError.value = 'Учасник з такою електронною поштою вже існує.';
+    return;
+  }
+  externalError.value = '';
+  const index = participants.value.findIndex(p => p.id === updatedUser.id);
+  if (index !== -1) {
+    participants.value[index] = updatedUser;
+  }
+  closeEditModal();
+}
 
-  errors.name = '';
-  errors.dob = '';
-  errors.email = '';
-  errors.phone = '';
+function openDeleteModal(user: User) {
+  deletingUser.value = user;
+  showDeleteModal.value = true;
+}
+
+function closeDeleteModal() {
+  showDeleteModal.value = false;
+  deletingUser.value = null;
+}
+
+function confirmDelete() {
+  if (deletingUser.value) {
+    participants.value = participants.value.filter(p => p.id !== deletingUser.value?.id);
+    winners.value = winners.value.filter(w => w.id !== deletingUser.value?.id);
+  }
+  closeDeleteModal();
 }
 
 function selectWinner() {
   if (winners.value.length >= 3 || participants.value.length === 0) return;
-
   const randomIndex = Math.floor(Math.random() * participants.value.length);
   const winner = participants.value[randomIndex];
   if (winner) {
@@ -210,18 +154,12 @@ function removeWinner(index: number) {
   winners.value.splice(index, 1);
 }
 
-function formatDate(date: string): string {
-  const [year, month, day] = date.split('-');
-  return `${day}/${month}/${year}`;
+function handleSort(key: 'name' | 'dob') {
+  if (sortKey.value === key) {
+    sortOrder.value = (sortOrder.value * -1) as 1 | -1;
+  } else {
+    sortKey.value = key;
+    sortOrder.value = 1;
+  }
 }
 </script>
-
-<style scoped>
-.card {
-  background-color: #f8f9fa;
-}
-.list-group-item {
-  background-color: #f8f9fa;
-  border: none;
-}
-</style>
